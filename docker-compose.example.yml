@@ -1,0 +1,67 @@
+# Vorio Agent - Docker Compose Configuration
+#
+# 1. Copy this file to docker-compose.yml
+# 2. Fill in your configuration values
+# 3. Run: docker-compose up -d
+#
+# For the agent token, create a new connection in Vorio and copy the token.
+
+services:
+  vorio-agent:
+    # Use pre-built image:
+    image: ghcr.io/rocobyte/vorio-app-agent:latest
+    # Or build locally:
+    # build: .
+    container_name: vorio-agent
+    restart: unless-stopped
+    environment:
+      # Vorio Cloud Configuration
+      # Get your agent token from Vorio: Project Settings > Connection
+      - VORIO_API_URL=https://api.vorio.app
+      - VORIO_AGENT_TOKEN=vat_your_agent_token_here
+
+      # UniFi Controller Configuration
+      # The agent needs network access to your UniFi Controller
+      - UNIFI_HOST=192.168.1.1
+      - UNIFI_PORT=443
+
+      # Authentication - Choose ONE method:
+
+      # Option 1: API Key (Recommended for UniFi Network Application 8.0+)
+      # Create API Key in UniFi: Settings > Admins & Users > API Keys
+      - UNIFI_API_KEY=your_api_key_here
+
+      # Option 2: Username/Password (Legacy, for older UniFi Controllers)
+      # - UNIFI_USERNAME=admin
+      # - UNIFI_PASSWORD=your_password_here
+
+      # Site name (usually "default")
+      - UNIFI_SITE=default
+
+      # Optional: Skip SSL verification (for self-signed certs)
+      - UNIFI_SKIP_SSL_VERIFY=true
+
+      # Optional: Sync interval in milliseconds (default: 120000 = 2 minutes)
+      # - SYNC_INTERVAL_MS=120000
+
+    # Network mode: Use host network if UniFi Controller is on the same network
+    # network_mode: host
+
+    # Or use bridge network (default)
+    networks:
+      - default
+
+    # Optional: Add extra hosts for DNS resolution
+    # extra_hosts:
+    #   - "unifi.local:192.168.1.1"
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    driver: bridge
