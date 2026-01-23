@@ -19,15 +19,18 @@
  *   ├── Connect to Vorio Cloud
  *   ├── Initial voucher sync
  *   ├── Start command poll loop (every 10s)
- *   └── Start sync loop (every 2min)
+ *   ├── Start sync loop (every 2min)
+ *   └── Start heartbeat loop (every 30s)
  *
  * Running...
  *   ├── Command loop: poll → process → complete
- *   └── Sync loop: fetch → upload → heartbeat
+ *   ├── Sync loop: fetch → upload vouchers
+ *   └── Heartbeat loop: send status to cloud
  *
  * stop()
  *   ├── Stop command loop
  *   ├── Stop sync loop
+ *   ├── Stop heartbeat loop
  *   ├── Disconnect from Vorio
  *   └── Logout from controller
  * ```
@@ -91,6 +94,9 @@ export class SyncService {
 
   /** Command poll loop interval handle */
   private commandPollInterval?: NodeJS.Timeout;
+
+  /** Heartbeat loop interval handle */
+  private heartbeatInterval?: NodeJS.Timeout;
 
   /** Current service status */
   private status: AgentStatus = {
@@ -168,6 +174,7 @@ export class SyncService {
       // Step 6: Start loops
       this.startCommandPollLoop();
       this.startSyncLoop();
+      this.startHeartbeatLoop();
 
       logger.info('Sync service started successfully');
     } catch (error) {
@@ -205,6 +212,12 @@ export class SyncService {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = undefined;
+    }
+
+    // Stop heartbeat loop
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = undefined;
     }
 
     // Disconnect from Vorio Cloud
@@ -258,7 +271,7 @@ export class SyncService {
   /**
    * Start the sync loop.
    *
-   * Periodically syncs vouchers and sends heartbeats (default 2 min).
+   * Periodically syncs vouchers (default 2 min).
    * @internal
    */
   private startSyncLoop(): void {
@@ -272,22 +285,42 @@ export class SyncService {
       if (!this.isRunning) return;
 
       try {
-        await this.syncCycle();
+        await this.performSync();
       } catch (error) {
         logger.error('Sync cycle error');
         this.logError(error);
         this.status.lastError = getErrorMessage(error);
+      }
+    }, intervalMs);
+  }
 
-        // Send error heartbeat
-        try {
-          await this.vorioClient.heartbeat({
-            voucherCount: this.status.voucherCount,
-            status: 'error',
-            error: this.status.lastError,
-          });
-        } catch {
-          // Ignore heartbeat errors
-        }
+  /**
+   * Start the heartbeat loop.
+   *
+   * Sends heartbeats every 30 seconds, independent of sync interval.
+   * This ensures the frontend can detect disconnections quickly.
+   * @internal
+   */
+  private startHeartbeatLoop(): void {
+    const intervalMs = 30 * 1000; // 30 seconds
+    logger.info('Starting heartbeat loop', {
+      intervalMs,
+      intervalSec: intervalMs / 1000,
+    });
+
+    this.heartbeatInterval = setInterval(async () => {
+      if (!this.isRunning) return;
+
+      try {
+        await this.vorioClient.heartbeat({
+          voucherCount: this.status.voucherCount,
+          status: this.status.lastError ? 'error' : 'ok',
+          error: this.status.lastError,
+        });
+        logger.debug('Heartbeat sent');
+      } catch (error) {
+        logger.error('Heartbeat error');
+        this.logError(error);
       }
     }, intervalMs);
   }
@@ -296,22 +329,6 @@ export class SyncService {
   // Sync Operations
   // ==========================================================================
 
-  /**
-   * Perform a single sync cycle.
-   *
-   * Syncs vouchers and sends a heartbeat.
-   * @internal
-   */
-  private async syncCycle(): Promise<void> {
-    // Sync vouchers
-    await this.performSync();
-
-    // Send heartbeat
-    await this.vorioClient.heartbeat({
-      voucherCount: this.status.voucherCount,
-      status: 'ok',
-    });
-  }
 
   /**
    * Perform a full voucher sync.
