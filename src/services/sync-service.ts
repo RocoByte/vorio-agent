@@ -98,6 +98,9 @@ export class SyncService {
   /** Heartbeat loop interval handle */
   private heartbeatInterval?: NodeJS.Timeout;
 
+  /** Consecutive heartbeat failure counter */
+  private consecutiveHeartbeatFailures = 0;
+
   /** Current service status */
   private status: AgentStatus = {
     connected: false,
@@ -310,19 +313,45 @@ export class SyncService {
 
     this.heartbeatInterval = setInterval(async () => {
       if (!this.isRunning) return;
-
-      try {
-        await this.vorioClient.heartbeat({
-          voucherCount: this.status.voucherCount,
-          status: this.status.lastError ? 'error' : 'ok',
-          error: this.status.lastError,
-        });
-        logger.debug('Heartbeat sent');
-      } catch (error) {
-        logger.error('Heartbeat error');
-        this.logError(error);
-      }
+      await this.sendHeartbeat();
     }, intervalMs);
+  }
+
+  /** Send a single heartbeat, retry once on failure after 5s delay. */
+  private async sendHeartbeat(): Promise<void> {
+    const payload = {
+      voucherCount: this.status.voucherCount,
+      status: this.status.lastError ? 'error' as const : 'ok' as const,
+      error: this.status.lastError,
+    };
+
+    try {
+      await this.vorioClient.heartbeat(payload);
+      this.consecutiveHeartbeatFailures = 0;
+      logger.debug('Heartbeat sent');
+    } catch (error) {
+      this.consecutiveHeartbeatFailures++;
+      logger.error(`Heartbeat failed (attempt ${this.consecutiveHeartbeatFailures})`);
+      this.logError(error);
+
+      // Retry once after 5 seconds
+      if (this.consecutiveHeartbeatFailures <= 2 && this.isRunning) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        if (!this.isRunning) return;
+        try {
+          await this.vorioClient.heartbeat(payload);
+          this.consecutiveHeartbeatFailures = 0;
+          logger.info('Heartbeat retry succeeded');
+        } catch (retryError) {
+          logger.error('Heartbeat retry also failed');
+          this.logError(retryError);
+        }
+      }
+
+      if (this.consecutiveHeartbeatFailures >= 3) {
+        logger.warn(`${this.consecutiveHeartbeatFailures} consecutive heartbeat failures — cloud may mark agent as disconnected`);
+      }
+    }
   }
 
   // ==========================================================================

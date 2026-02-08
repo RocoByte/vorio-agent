@@ -54,8 +54,8 @@ const logger = createLogger('Vorio');
 /** Agent version for User-Agent header */
 const AGENT_VERSION = '1.0.0';
 
-/** Default request timeout (30 seconds) */
-const REQUEST_TIMEOUT = 30000;
+/** Default request timeout (15 seconds) */
+const REQUEST_TIMEOUT = 15000;
 
 // ============================================================================
 // Vorio Client Implementation
